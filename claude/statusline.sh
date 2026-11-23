@@ -50,4 +50,23 @@ if [ -n "$d7" ]; then
   [ -n "$d7r" ] && printf ' ↻%s' "$(until_reset "$d7r")"
   printf '\033[00m'
 fi
+# ccusage has no billing-period concept; period start is a fixed day of month (matches invoice, e.g. Nov 19–Dec 19).
+# Cached 60s because the statusline re-runs often. Version is pinned: `npx --no-install ccusage` doesn't match the npx cache entry, and unpinned npx would refetch.
+BILLING_DAY=19
+cache=${TMPDIR:-/tmp}/ccusage-period-cost
+if [ ! -f "$cache" ] || [ $(( $(date +%s) - $(stat -c %Y "$cache") )) -gt 60 ]; then
+  today=$(date +%d | sed 's/^0//')
+  if [ "$today" -ge "$BILLING_DAY" ]; then
+    start=$(date +%Y%m)$(printf '%02d' "$BILLING_DAY")
+  else
+    start=$(date -d "$(date +%Y-%m-01) -1 month" +%Y%m)$(printf '%02d' "$BILLING_DAY")
+  fi
+  c=$(npx -y ccusage@20.0.51 daily --since "$start" --json -O 2>/dev/null \
+    | jq -r --arg t "$(date +%F)" '[([.daily[] | select(.period == $t) | .totalCost] | add // 0), .totals.totalCost] | @tsv')
+  [ -n "$c" ] && printf '%s' "$c" > "$cache"
+fi
+costs=$(cat "$cache" 2>/dev/null)
+if [ -n "$costs" ]; then
+  sep; printf '\033[31m$%.2f ($%.2f)\033[00m' "${costs% *}" "${costs#*  }"
+fi
 exit 0
